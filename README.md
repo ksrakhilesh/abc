@@ -1,150 +1,158 @@
-# Design an Expense Sharing System
+### Rate Limiting System
 
-> You are tasked with designing an expense sharing system that allows users to track shared expenses among a group of people. The system should support the following functionalities:
+#### Problem Statement
 
-1. **Add Expense:**
+Implement a **rate limiting system** to prevent API abuse by limiting the number of requests a user can make within different time windows.
 
-   - Create a function that enables a user to add an expense.
-   - Parameters:
-     - Main user (the one who paid)
-     - Amount of the expense
-     - List of users included in the payment
+#### Core Requirements
 
-   **Examples**
+1. Track requests at user and endpoint level
+2. Support different time windows (per second, minute, hour).
+3. Efficient memory usage (cleanup old data when no longer needed).
+4. O(1) lookup time for checking rate limits.
 
-   ```typescript
-   expenseSystem.addExpense("A", 1000, ["B", "C", "D"]);
-   expenseSystem.addExpense("B", 1200, ["A", "C"]);
-   expenseSystem.addExpense("C", 400, ["A", "B", "D"]);
-   ```
+#### Example Use Cases
 
-2. **List User's Expenses:**
+1. `/api/search`: Max 5 requests per second
 
-   - Implement a function that lists all the expenses a given user is involved in.
-   - Details to include: Main user, amount, and the other participants.
+   - **Scenario**: User A makes 6 rapid requests.
+     - First 5 requests should succeed.
+     - The 6th request should fail.
+     - After 1 second, the counter should reset, allowing new requests.
 
-   **Example 1: User D**
-
-   ```typescript
-   const userAExpenses = expenseSystem.listUserExpenses("D");
-   ```
-
-   **Expected Output:**
-
-   ```
-   // 1. A Pays 1000 with B, C, and D
-   // 2. C Pays 400 with A, B, and D
-   ```
-
-   **Example 2: User C**
-
-   ```typescript
-   const userAExpenses = expenseSystem.listUserExpenses("C");
-   ```
-
-   **Expected Output:**
-
-   ```
-   // 1. A Pays 1000 with B, C, and D
-   // 2. B Pays 1200 with A and C
-   // 3. C Pays 400 with A, B, and D
-   ```
-
-3. **Generate Individual Summary:**
-
-   - Develop a function that generates a summary for each individual user.
-   - The summary should summarize all the expenses they are involved in and whether they owe money or are owed money.
-
-   **Examples**
-
-   ```typescript
-   expenseSystem.addExpense("A", 1000, ["B", "C", "D"]);
-   const userASummary = expenseSystem.generateIndividualSummary("A");
-   // After the above expense, the following summary is generated for A:
-   ```
-
-   ```
-    B owes A 250
-    C owes A 250
-    D owes A 250
-   ```
-
-   ```typescript
-   expenseSystem.addExpense("B", 1200, ["A", "C"]);
-   // After the above expense, the following summary is generated for A:
-   const userASummary = expenseSystem.generateIndividualSummary("A");
-   ```
-
-   ```
-     A owes B 150 ( 400 - 250 )
-     C owes A 250
-     D owes A 250
-   ```
-
-   ```typescript
-   expenseSystem.addExpense("C", 400, ["A", "B", "D"]);
-   // After the above expense, the following summary is generated for A:
-   const userASummary = expenseSystem.generateIndividualSummary("A");
-   ```
-
-   ```
-   A owes B 150 ( 400 - 250 )
-   C owes A 150 ( 250 - 100 )
-   D owes A 250
-   ```
-
-4. **Settle Funds:**
-
-   - Design a function that calculates and performs fund settlements between two users.
-   - Given two users, find the simplest way to settle the debts if any exist.
-
-   **Examples**
-
-   ```typescript
-   // Example Function call
-   // Just pass 2 users and get the settlement b/w these 2 users
-   const settlementsAB = expenseSystem.settleFunds("A", "B");
-   ```
-
-   **Example after each expense added:**
-
-   ```
-    expenseSystem.addExpense("A", 1000, ["B", "C", "D"]);
-    // After the above expense, the following should be the settlements
-
-    > settleFunds("A", "B"):
-    Output: B owes A 250
-
-    > settleFunds("A", "C"):
-    Output: C owes A 250
-
-    expenseSystem.addExpense("B", 1200, ["A", "C"]);
-    // After the above expense, the following should be the settlements
-
-    > settleFunds("A", "B"):
-    Output: A owes B 150
-
-    > settleFunds("A", "C"):
-    Output: C owes A 250
-
-    > settleFunds("B", "C"):
-    Output: C owes B 400
-
-
-    expenseSystem.addExpense("C", 400, ["B", "D", "F"]);
-    // After the above expense, the following should be the settlements
-
-    > settleFunds("A", "B"):
-    Output: A owes B 150
-
-    > settleFunds("A", "C"):
-    Output: C owes A 150
-   ```
-
-   ### Constraints
-
-   - Treat this as a ds-algo problem, and you are expected to implement the solution in a language of your choice.
-   - Add Expense can have any time complexity, but the all other functions should have the least time complexity possible.
-   - Space complexity should be optimized but not at the cost of time complexity.
+2. `/api/upload`: Max 10 requests per minute
+   - **Scenario**: User B uploads 11 files within 30 seconds.
+     - First 10 requests should succeed.
+     - The 11th request should fail.
+     - After 1 minute from the first request, the counter should reset.
 
 ---
+
+### Interfaces
+
+#### RateLimitRule
+
+Defines a rate limit rule for an endpoint.
+
+```typescript
+interface RateLimitRule {
+  endpoint: string; // The API endpoint (e.g., '/api/search')
+  limit: number; // Maximum number of requests allowed in the time window
+  windowMs: number; // Time window in milliseconds (e.g., 1000 for 1 second)
+}
+```
+
+#### RateLimitResult
+
+Result returned when checking if a request is allowed.
+
+```typescript
+interface RateLimitResult {
+  isAllowed: boolean; // Whether the request is allowed
+  remainingLimit: number; // Number of requests remaining in the current window
+  resetTime: Date; // When the current time window will reset
+}
+```
+
+---
+
+### Main Class
+
+#### RateLimiter
+
+The main class you need to implement.
+
+```typescript
+class RateLimiter {
+  /**
+   * Initialize the rate limiter with a list of rules.
+   *
+   * @param rules List of rate limit rules to enforce
+   *
+   * Example:
+   * const limiter = new RateLimiter([
+   *   { endpoint: '/api/search', limit: 5, windowMs: 1000 },
+   *   { endpoint: '/api/upload', limit: 10, windowMs: 60000 }
+   * ]);
+   */
+  constructor(rules: RateLimitRule[]) {
+    // TODO: Initialize your data structures
+  }
+
+  /**
+   * Check if a request should be allowed based on rate limits.
+   *
+   * @param userId Unique identifier for the user making the request
+   * @param endpoint The API endpoint being accessed
+   * @returns Result indicating if the request is allowed
+   *
+   * Example:
+   * const result = limiter.checkLimit('user123', '/api/search');
+   * if (result.isAllowed) {
+   *   // Allow request
+   * } else {
+   *   // Return 429 Too Many Requests
+   * }
+   */
+  checkLimit(userId: string, endpoint: string): RateLimitResult {
+    // TODO: Implement rate limiting logic
+    // 1. Find matching rule for the endpoint
+    // 2. Check and update request count for the user
+    // 3. Return appropriate result
+  }
+}
+```
+
+---
+
+### Example Test Cases
+
+#### 1. Basic Rate Limiting
+
+```typescript
+const limiter = new RateLimiter([
+  { endpoint: "/api/search", limit: 5, windowMs: 1000 },
+]);
+
+// Should allow 5 requests
+for (let i = 0; i < 5; i++) {
+  const result = limiter.checkLimit("user1", "/api/search");
+  console.log(result.isAllowed); // true
+  console.log(result.remainingLimit); // 4, 3, 2, 1, 0
+}
+
+// Should deny the 6th request
+const result = limiter.checkLimit("user1", "/api/search");
+console.log(result.isAllowed); // false
+console.log(result.remainingLimit); // 0
+```
+
+#### 2. Window Reset
+
+```typescript
+// Wait 1 second
+await new Promise((resolve) => setTimeout(resolve, 1000));
+
+// Should allow requests again
+const result = limiter.checkLimit("user1", "/api/search");
+console.log(result.isAllowed); // true
+console.log(result.remainingLimit); // 4
+```
+
+---
+
+### Constraints
+
+1. The implementation should efficiently handle cleanup of old data to minimize memory usage.
+2. Ensure O(1) lookup time for checking and updating rate limits.
+3. Consider edge cases:
+   - No rule exists for an endpoint.
+   - Invalid or empty `userId`.
+   - Requests made exactly at the boundary of the time window.
+
+---
+
+### Notes
+
+- Focus on implementing the `checkLimit` method efficiently.
+- Test thoroughly with different scenarios and edge cases.
