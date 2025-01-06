@@ -96,9 +96,6 @@ class RateLimiter {
    */
   checkLimit(userId: string, endpoint: string): RateLimitResult {
     // TODO: Implement rate limiting logic
-    // 1. Find matching rule for the endpoint
-    // 2. Check and update request count for the user
-    // 3. Return appropriate result
   }
 }
 ```
